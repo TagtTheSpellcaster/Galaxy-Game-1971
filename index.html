@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Galaxy Game (1971) - First Coin-Op Arcade Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=VT323&family=Share+Tech+Mono&display=swap');
+
+        body {
+            background-color: #050505;
+            color: #00ff66;
+            font-family: 'VT323', monospace;
+            user-select: none;
+            overflow: hidden;
+        }
+
+        /* CRT Screen Scanlines & Phosphor Glow Effect */
+        .crt-overlay {
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.35) 50%
+            ), linear-gradient(
+                90deg,
+                rgba(255, 0, 0, 0.03),
+                rgba(0, 255, 0, 0.01),
+                rgba(0, 0, 255, 0.03)
+            );
+            background-size: 100% 4px, 6px 100%;
+            pointer-events: none;
+        }
+
+        .crt-screen {
+            box-shadow: inset 0 0 80px rgba(0, 255, 102, 0.15), 0 0 25px rgba(0, 255, 102, 0.2);
+            border: 12px solid #1a1a1a;
+            border-radius: 20px;
+        }
+
+        /* Hide cursor when active on canvas */
+        .hide-cursor {
+            cursor: none !important;
+        }
+
+        /* Arcade Bezel Glow & Styling */
+        .bezel-text {
+            text-shadow: 0 0 8px rgba(0, 255, 102, 0.8), 0 0 15px rgba(0, 255, 102, 0.4);
+        }
+
+        .bezel-gold {
+            color: #ffcc00;
+            text-shadow: 0 0 8px rgba(255, 204, 0, 0.8);
+        }
+
+        canvas {
+            display: block;
+            image-rendering: pixelated;
+        }
+
+        /* Custom Scrollbars for modal/panels if needed */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: #00ff66; }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col justify-between items-center p-2 sm:p-4 bg-black">
+
+    <!-- Top Cabinet Header / Bezel -->
+    <header class="w-full max-w-5xl flex justify-between items-center px-4 py-2 bg-neutral-900 border-2 border-neutral-800 rounded-t-lg shadow-lg">
+        <div class="flex items-center space-x-3">
+            <div class="w-3 h-3 rounded-full bg-red-600 animate-pulse"></div>
+            <h1 class="text-2xl sm:text-4xl font-bold tracking-widest bezel-gold uppercase">GALAXY GAME</h1>
+            <span class="hidden md:inline text-xs sm:text-sm text-neutral-400 font-mono">PDP-11 / 1971 COIN-OP</span>
+        </div>
+
+        <!-- Status Counters -->
+        <div class="flex items-center space-x-6 text-lg sm:text-2xl">
+            <div>
+                <span class="text-neutral-500 text-xs block font-mono">CREDITS</span>
+                <span id="credit-count" class="bezel-text font-bold text-yellow-400">00</span>
+            </div>
+            <div>
+                <span class="text-neutral-500 text-xs block font-mono">TIME LEFT</span>
+                <span id="game-timer" class="bezel-text font-bold">120s</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Arcade Display Area -->
+    <main id="main-display" class="relative w-full max-w-5xl flex-1 flex flex-col items-center justify-center my-1 crt-screen overflow-hidden bg-black">
+        <!-- CRT Overlay FX -->
+        <div class="absolute inset-0 crt-overlay z-10"></div>
+
+        <!-- Canvas Game Screen -->
+        <canvas id="gameCanvas" class="w-full h-full object-contain"></canvas>
+
+        <!-- Pause Screen Overlay -->
+        <div id="pause-ui" class="hidden absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm text-center">
+            <h2 class="text-5xl sm:text-7xl font-bold mb-4 bezel-text tracking-widest animate-pulse">PAUSED</h2>
+            <p class="text-emerald-400 font-mono text-sm sm:text-base mb-6">PRESS <span class="text-white font-bold bg-neutral-800 px-2 py-1 rounded border border-emerald-500/40">ESC</span> TO RESUME GAME</p>
+            <button id="btn-resume" class="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-black font-bold text-lg rounded shadow-lg transition active:scale-95 font-mono">
+                RESUME GAME
+            </button>
+        </div>
+
+        <!-- Attract / Start Overlay UI -->
+        <div id="overlay-ui" class="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/85 p-6 text-center">
+            <h2 class="text-4xl sm:text-6xl font-bold mb-4 bezel-text tracking-wider">GALAXY GAME (1971)</h2>
+
+            <div class="bg-neutral-950 border border-emerald-500/40 p-4 rounded-lg mb-6 max-w-md w-full text-left font-mono text-xs sm:text-sm space-y-2">
+                <div class="text-emerald-400 font-bold border-b border-emerald-500/30 pb-1">INSTRUCTIONS & PHYSICS:</div>
+                <p>• Avoid the central Sun's intense gravitational pull.</p>
+                <p>• Ships carry limited torpedo fuel & energy supply.</p>
+                <p>• Hyperspace warps instantly, but risk of explosion increases each use!</p>
+                <p class="text-yellow-400 border-t border-emerald-500/20 pt-1">• Press <span class="text-white font-bold">ESC</span> in-game to Pause / Unpause.</p>
+            </div>
+
+            <!-- Ship Selector for 1P Mode -->
+            <div id="ship-select-container" class="mb-4 bg-neutral-950 border border-emerald-500/30 p-3 rounded-lg flex flex-col items-center gap-2">
+                <span class="text-xs text-neutral-400 font-mono tracking-wider">1 PLAYER SHIP SELECTION:</span>
+                <div class="flex gap-4">
+                    <label class="flex items-center gap-2 cursor-pointer text-sm font-mono text-emerald-400">
+                        <input type="radio" name="p1-ship" value="wedge" checked class="accent-emerald-500">
+                        WEDGE (Triangular)
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer text-sm font-mono text-emerald-300">
+                        <input type="radio" name="p1-ship" value="needle" class="accent-emerald-500">
+                        NEEDLE (Slender)
+                    </label>
+                </div>
+            </div>
+
+            <!-- Coin / Game Mode Action Buttons -->
+            <div class="flex flex-col sm:flex-row gap-4 mb-4">
+                <button id="btn-insert-coin" class="px-6 py-3 bg-yellow-500 hover:bg-yellow-400 text-black font-bold text-xl rounded shadow-lg transition active:scale-95">
+                    INSERT COIN [PRESS 'C']
+                </button>
+            </div>
+
+            <div class="flex flex-wrap justify-center gap-3" id="start-buttons">
+                <button id="btn-start-1p" disabled class="px-5 py-2.5 bg-emerald-700/50 text-neutral-400 font-bold text-lg rounded border border-emerald-500/30 cursor-not-allowed">
+                    1 PLAYER vs AI [PRESS '1']
+                </button>
+                <button id="btn-start-2p" disabled class="px-5 py-2.5 bg-emerald-700/50 text-neutral-400 font-bold text-lg rounded border border-emerald-500/30 cursor-not-allowed">
+                    2 PLAYER DUAL [PRESS '2']
+                </button>
+            </div>
+            
+            <p id="coin-prompt" class="mt-4 text-yellow-400 animate-pulse text-sm sm:text-base font-mono">INSERT 1 COIN TO PLAY</p>
+        </div>
+    </main>
+
+    <!-- Lower Arcade Cabinet Control Dashboard -->
+    <footer class="w-full max-w-5xl bg-neutral-900 border-2 border-neutral-800 rounded-b-lg p-3 sm:p-4 text-xs sm:text-sm font-mono">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center md:text-left items-center">
+            <!-- P1 Controls Legend -->
+            <div class="border border-neutral-800 p-2 rounded bg-neutral-950">
+                <div class="text-emerald-400 font-bold text-sm mb-1" id="p1-label">PLAYER 1</div>
+                <div>Rotate: <span class="text-white">A/D</span> or <span class="text-white">←/→</span> | Thrust: <span class="text-white">W</span> or <span class="text-white">↑</span></div>
+                <div>Fire: <span class="text-white">S</span> / <span class="text-white">Space</span> | Hyperspace: <span class="text-white">Shift</span> / <span class="text-white">Ctrl</span></div>
+            </div>
+
+            <!-- Score & Match Stats -->
+            <div class="flex flex-col items-center justify-center">
+                <div class="flex justify-around w-full text-base sm:text-lg font-bold mb-1">
+                    <span class="text-emerald-400">P1: <span id="score-p1">0</span></span>
+                    <span class="text-emerald-300">P2: <span id="score-p2">0</span></span>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button id="btn-audio-toggle" class="px-3 py-1 bg-neutral-800 hover:bg-neutral-700 text-emerald-400 rounded border border-emerald-500/30">
+                        🔊 AUDIO: ON
+                    </button>
+                </div>
+            </div>
+
+            <!-- P2 Controls Legend -->
+            <div class="border border-neutral-800 p-2 rounded bg-neutral-950 text-right md:text-right">
+                <div class="text-emerald-300 font-bold text-sm mb-1" id="p2-label">PLAYER 2</div>
+                <div id="p2-controls-legend">
+                    <div>Rotate: <span class="text-white">← / →</span> | Thrust: <span class="text-white">↑</span></div>
+                    <div>Fire: <span class="text-white">↓</span> | Hyperspace: <span class="text-white">Space</span></div>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- JavaScript Logic -->
+    <script>
+        /**
+         * GALAXY GAME (1971) - HTML5 Canvas Arcade Emulation
+         * Fully procedural vector canvas rendering with retro audio & Newtonian physics.
+         */
+
+        // --- Web Audio Synthesizer Engine ---
+        class SoundEngine {
+            constructor() {
+                this.ctx = null;
+                this.enabled = true;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioCtx();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            playCoin() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(987.77, this.ctx.currentTime); // B5
+                osc.frequency.setValueAtTime(1318.51, this.ctx.currentTime + 0.08); // E6
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.3);
+            }
+
+            playShoot() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 0.12);
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.12);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.12);
+            }
+
+            playThrust() {
+                if (!this.enabled || !this.ctx) return;
+                const bufferSize = this.ctx.sampleRate * 0.05;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.value = 150;
+                filter.Q.value = 3.0;
+
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.05);
+
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.ctx.destination);
+                noise.start();
+            }
+
+            playExplosion() {
+                if (!this.enabled || !this.ctx) return;
+                const duration = 0.6;
+                const bufferSize = this.ctx.sampleRate * duration;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(600, this.ctx.currentTime);
+                filter.frequency.linearRampToValueAtTime(30, this.ctx.currentTime + duration);
+
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0.5, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.ctx.destination);
+                noise.start();
+            }
+
+            playHyperspace() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(1200, this.ctx.currentTime + 0.25);
+                gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.25);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.25);
+            }
+        }
+
+        // --- Game Setup & State ---
+        const canvas = document.getElementById('gameCanvas');
+        const mainDisplay = document.getElementById('main-display');
+        const pauseUi = document.getElementById('pause-ui');
+        const ctx = canvas.getContext('2d');
+        const sound = new SoundEngine();
+
+        let credits = 0;
+        let gameActive = false;
+        let isPaused = false;
+        let gameMode = '2P'; // '1P' or '2P'
+        let matchTimer = 120; // 2 minutes round
+        let timerInterval = null;
+        let p1Score = 0;
+        let p2Score = 0;
+
+        // Key Tracker
+        const keys = {};
+
+        // Canvas Sizing
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Cursor Visibility Manager
+        function updateCursorState() {
+            if (gameActive && !isPaused) {
+                mainDisplay.classList.add('hide-cursor');
+            } else {
+                mainDisplay.classList.remove('hide-cursor');
+            }
+        }
+
+        // Pause Manager
+        function togglePause() {
+            if (!gameActive) return;
+            isPaused = !isPaused;
+            if (isPaused) {
+                pauseUi.classList.remove('hidden');
+            } else {
+                pauseUi.classList.add('hidden');
+                lastTime = performance.now(); // reset time delta after pause
+            }
+            updateCursorState();
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Gravitational Central Star
+        const STAR_GRAVITY = 1800; // Gravitational constant * Mass
+        const STAR_RADIUS = 12;
+
+        // --- Game Entities ---
+        class Ship {
+            constructor(x, y, type, color) {
+                this.type = type; // 'wedge' or 'needle'
+                this.color = color;
+                this.reset(x, y);
+            }
+
+            reset(x, y) {
+                this.x = x;
+                this.y = y;
+                this.vx = 0;
+                this.vy = 0;
+                this.angle = this.type === 'wedge' ? 0 : Math.PI; // Face opposite directions
+                this.rotSpeed = 0;
+                this.alive = true;
+                this.hyperspaceCount = 0;
+                this.cooldown = 0;
+                this.fuel = 1000;
+            }
+
+            update(dt) {
+                if (!this.alive) return;
+
+                // Rotational Inertia
+                this.angle += this.rotSpeed * dt;
+                this.rotSpeed *= 0.92; // Rotational friction
+
+                // Apply Central Gravity Well (Inversely proportional to distance squared)
+                const dx = canvas.width / 2 - this.x;
+                const dy = canvas.height / 2 - this.y;
+                const distSq = dx * dx + dy * dy;
+                const dist = Math.sqrt(distSq);
+
+                if (dist > STAR_RADIUS) {
+                    const force = STAR_GRAVITY / (distSq + 200);
+                    this.vx += (dx / dist) * force * dt * 60;
+                    this.vy += (dy / dist) * force * dt * 60;
+                } else {
+                    // Crashed into the star!
+                    this.destroy();
+                }
+
+                // Physics movement
+                this.x += this.vx * dt;
+                this.y += this.vy * dt;
+
+                // Screen Wrap-around Mechanics (Authentic Spacewar!)
+                if (this.x < 0) this.x = canvas.width;
+                if (this.x > canvas.width) this.x = 0;
+                if (this.y < 0) this.y = canvas.height;
+                if (this.y > canvas.height) this.y = 0;
+
+                if (this.cooldown > 0) this.cooldown -= dt;
+            }
+
+            thrust() {
+                if (!this.alive || this.fuel <= 0) return;
+                const thrustPower = 180;
+                this.vx += Math.cos(this.angle) * thrustPower * 0.016;
+                this.vy += Math.sin(this.angle) * thrustPower * 0.016;
+                this.fuel -= 0.5;
+                sound.playThrust();
+
+                // Thrust Particle Effect
+                particles.push(new Particle(
+                    this.x - Math.cos(this.angle) * 12,
+                    this.y - Math.sin(this.angle) * 12,
+                    -Math.cos(this.angle + (Math.random() - 0.5) * 0.4) * 80 + this.vx * 0.3,
+                    -Math.sin(this.angle + (Math.random() - 0.5) * 0.4) * 80 + this.vy * 0.3,
+                    '#00ff66', 0.2
+                ));
+            }
+
+            rotate(dir) {
+                if (!this.alive) return;
+                this.rotSpeed = dir * 4.5;
+            }
+
+            fire() {
+                if (!this.alive || this.cooldown > 0) return;
+                this.cooldown = 0.25; // Delay between shots
+                const noseOffset = 16;
+                const noseX = this.x + Math.cos(this.angle) * noseOffset;
+                const noseY = this.y + Math.sin(this.angle) * noseOffset;
+
+                // Missile velocity inherits ship momentum
+                const speed = 320;
+                const missileVx = this.vx + Math.cos(this.angle) * speed;
+                const missileVy = this.vy + Math.sin(this.angle) * speed;
+
+                missiles.push(new Missile(noseX, noseY, missileVx, missileVy, this));
+                sound.playShoot();
+            }
+
+            triggerHyperspace() {
+                if (!this.alive) return;
+                sound.playHyperspace();
+                this.hyperspaceCount++;
+
+                // Risk of destruction increases with each consecutive attempt
+                const explosionRisk = (this.hyperspaceCount - 1) * 0.25;
+                if (Math.random() < explosionRisk) {
+                    this.destroy();
+                    return;
+                }
+
+                // Random teleport on screen with random velocity
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+                this.vx = (Math.random() - 0.5) * 100;
+                this.vy = (Math.random() - 0.5) * 100;
+            }
+
+            destroy() {
+                if (!this.alive) return;
+                this.alive = false;
+                sound.playExplosion();
+
+                // Create Vector Explosion Particle Cloud
+                for (let i = 0; i < 24; i++) {
+                    const ang = Math.random() * Math.PI * 2;
+                    const spd = 40 + Math.random() * 160;
+                    particles.push(new Particle(
+                        this.x, this.y,
+                        Math.cos(ang) * spd, Math.sin(ang) * spd,
+                        '#00ff66', 0.8
+                    ));
+                }
+            }
+
+            draw(ctx) {
+                if (!this.alive) return;
+
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+
+                ctx.strokeStyle = '#00ff66';
+                ctx.lineWidth = 1.8;
+                ctx.shadowBlur = 8;
+                ctx.shadowColor = '#00ff66';
+
+                ctx.beginPath();
+                if (this.type === 'wedge') {
+                    // "The Wedge" Ship Vector Model
+                    ctx.moveTo(14, 0);
+                    ctx.lineTo(-10, -9);
+                    ctx.lineTo(-5, 0);
+                    ctx.lineTo(-10, 9);
+                    ctx.closePath();
+                } else {
+                    // "The Needle / Pencil" Ship Vector Model
+                    ctx.moveTo(16, 0);
+                    ctx.lineTo(-12, -4);
+                    ctx.lineTo(-12, 4);
+                    ctx.closePath();
+                    ctx.moveTo(-4, -5);
+                    ctx.lineTo(-4, 5);
+                }
+                ctx.stroke();
+
+                ctx.restore();
+            }
+        }
+
+        class Missile {
+            constructor(x, y, vx, vy, owner) {
+                this.x = x;
+                this.y = y;
+                this.vx = vx;
+                this.vy = vy;
+                this.owner = owner;
+                this.life = 3.0; // Seconds active
+            }
+
+            update(dt) {
+                // Sun Gravity Pull on Missiles
+                const dx = canvas.width / 2 - this.x;
+                const dy = canvas.height / 2 - this.y;
+                const distSq = dx * dx + dy * dy;
+                const dist = Math.sqrt(distSq);
+
+                if (dist > STAR_RADIUS) {
+                    const force = STAR_GRAVITY / (distSq + 100);
+                    this.vx += (dx / dist) * force * dt * 60;
+                    this.vy += (dy / dist) * force * dt * 60;
+                } else {
+                    this.life = 0; // Destroyed by star
+                }
+
+                this.x += this.vx * dt;
+                this.y += this.vy * dt;
+
+                // Screen Wrap
+                if (this.x < 0) this.x = canvas.width;
+                if (this.x > canvas.width) this.x = 0;
+                if (this.y < 0) this.y = canvas.height;
+                if (this.y > canvas.height) this.y = 0;
+
+                this.life -= dt;
+            }
+
+            draw(ctx) {
+                ctx.save();
+                ctx.fillStyle = '#00ff66';
+                ctx.shadowBlur = 6;
+                ctx.shadowColor = '#00ff66';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        class Particle {
+            constructor(x, y, vx, vy, color, life) {
+                this.x = x;
+                this.y = y;
+                this.vx = vx;
+                this.vy = vy;
+                this.color = color;
+                this.maxLife = life;
+                this.life = life;
+            }
+
+            update(dt) {
+                this.x += this.vx * dt;
+                this.y += this.vy * dt;
+                this.life -= dt;
+            }
+
+            draw(ctx) {
+                const alpha = Math.max(0, this.life / this.maxLife);
+                ctx.save();
+                ctx.strokeStyle = `rgba(0, 255, 102, ${alpha})`;
+                ctx.shadowBlur = 4;
+                ctx.shadowColor = '#00ff66';
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.y);
+                ctx.lineTo(this.x - this.vx * 0.04, this.y - this.vy * 0.04);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        // --- Game Instances ---
+        let player1 = new Ship(100, 100, 'wedge', '#00ff66');
+        let player2 = new Ship(700, 500, 'needle', '#00ff66');
+        let missiles = [];
+        let particles = [];
+
+        // Dynamic Background Stars
+        const bgStars = Array.from({ length: 60 }, () => ({
+            x: Math.random(),
+            y: Math.random(),
+            brightness: Math.random()
+        }));
+
+        // Advanced AI Logic with Predictive Aiming, Active Evasion, and Orbit Management
+        function updateAI(dt) {
+            const ai = player2;
+            const target = player1;
+
+            if (gameMode !== '1P' || !ai.alive || !target.alive) return;
+
+            const sunX = canvas.width / 2;
+            const sunY = canvas.height / 2;
+
+            // 1. GRAVITY SUN AVOIDANCE (Top Priority)
+            const sunDx = sunX - ai.x;
+            const sunDy = sunY - ai.y;
+            const sunDist = Math.hypot(sunDx, sunDy);
+
+            // Vector pointing away from sun
+            let desiredVx = 0;
+            let desiredVy = 0;
+
+            if (sunDist < 160) {
+                // Tangential + radial escape vector
+                const escapePower = (160 - sunDist) / 160;
+                desiredVx += (-sunDx / sunDist + -sunDy / sunDist * 0.5) * escapePower * 300;
+                desiredVy += (-sunDy / sunDist + sunDx / sunDist * 0.5) * escapePower * 300;
+            }
+
+            // 2. ACTIVE BULLET EVASION
+            let dangerBullet = null;
+            let minThreatDist = 180;
+
+            for (const m of missiles) {
+                if (m.owner !== ai) {
+                    const mDx = m.x - ai.x;
+                    const mDy = m.y - ai.y;
+                    const mDist = Math.hypot(mDx, mDy);
+
+                    // Check if bullet is approaching AI
+                    const relVx = m.vx - ai.vx;
+                    const relVy = m.vy - ai.vy;
+                    const dot = (mDx * relVx + mDy * relVy);
+
+                    if (mDist < minThreatDist && dot < 0) {
+                        minThreatDist = mDist;
+                        dangerBullet = { m, mDx, mDy, mDist, relVx, relVy };
+                    }
+                }
+            }
+
+            let isEvading = false;
+            if (dangerBullet) {
+                isEvading = true;
+                // Perpendicular evasion vector away from incoming missile path
+                const perpX = -dangerBullet.mDy / dangerBullet.mDist;
+                const perpY = dangerBullet.mDx / dangerBullet.mDist;
+                desiredVx += perpX * 280;
+                desiredVy += perpY * 280;
+
+                // Emergency Hyperspace if bullet is extremely close and direct hit is imminent
+                if (dangerBullet.mDist < 45 && Math.random() < 0.08) {
+                    ai.triggerHyperspace();
+                    return;
+                }
+            }
+
+            // 3. TACTICAL ENGAGEMENT & DEFLECTION SHOOTING (Lead Target Calculation)
+            const dx = target.x - ai.x;
+            const dy = target.y - ai.y;
+            const dist = Math.hypot(dx, dy);
+
+            // Calculate lead target intercept time
+            const projectileSpeed = 320;
+            const timeToTarget = dist / projectileSpeed;
+
+            // Target predicted position (taking velocity into account)
+            const targetPredX = target.x + target.vx * timeToTarget;
+            const targetPredY = target.y + target.vy * timeToTarget;
+
+            const predDx = targetPredX - ai.x;
+            const predDy = targetPredY - ai.y;
+            let aimAngle = Math.atan2(predDy, predDx);
+
+            // Positioning strategy: maintain ideal combat distance (~180-280px)
+            if (!isEvading && sunDist >= 160) {
+                if (dist > 280) {
+                    // Close in
+                    desiredVx += (dx / dist) * 150;
+                    desiredVy += (dy / dist) * 150;
+                } else if (dist < 120) {
+                    // Back off
+                    desiredVx -= (dx / dist) * 150;
+                    desiredVy -= (dy / dist) * 150;
+                } else {
+                    // Lateral strafe maneuver
+                    desiredVx += (-dy / dist) * 100;
+                    desiredVy += (dx / dist) * 100;
+                }
+            }
+
+            // Determine steering direction based on desired trajectory vs current angle
+            let targetSteerAngle = isEvading ? Math.atan2(desiredVy, desiredVx) : aimAngle;
+
+            let angleDiff = targetSteerAngle - ai.angle;
+            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+
+            // Apply smooth rotation
+            if (angleDiff > 0.08) ai.rotate(1);
+            else if (angleDiff < -0.08) ai.rotate(-1);
+
+            // Apply thrust intelligently
+            if (isEvading || sunDist < 160) {
+                if (Math.abs(angleDiff) < 0.6) {
+                    ai.thrust();
+                }
+            } else if (dist > 180 && Math.abs(angleDiff) < 0.4) {
+                ai.thrust();
+            }
+
+            // Firing Decision (when aligned with lead target)
+            let directAngleDiff = aimAngle - ai.angle;
+            while (directAngleDiff < -Math.PI) directAngleDiff += Math.PI * 2;
+            while (directAngleDiff > Math.PI) directAngleDiff -= Math.PI * 2;
+
+            if (Math.abs(directAngleDiff) < 0.18 && dist < 420) {
+                ai.fire();
+            }
+        }
+
+        // --- Game Logic Loops & Physics Collisions ---
+        let lastTime = performance.now();
+
+        function gameLoop(now) {
+            const dt = Math.min((now - lastTime) / 1000, 0.1);
+            lastTime = now;
+
+            if (gameActive && !isPaused) {
+                // Controls Processing
+                if (gameMode === '1P') {
+                    // Unified Dual Controls Scheme for 1-Player Mode (A/D or Arrows for rotation)
+                    if (keys['a'] || keys['A'] || keys['ArrowLeft']) player1.rotate(-1);
+                    if (keys['d'] || keys['D'] || keys['ArrowRight']) player1.rotate(1);
+                    if (keys['w'] || keys['W'] || keys['ArrowUp']) player1.thrust();
+
+                    updateAI(dt);
+                } else {
+                    // 2-Player Controls
+                    if (keys['a'] || keys['A']) player1.rotate(-1);
+                    if (keys['d'] || keys['D']) player1.rotate(1);
+                    if (keys['w'] || keys['W']) player1.thrust();
+
+                    if (keys['ArrowLeft']) player2.rotate(-1);
+                    if (keys['ArrowRight']) player2.rotate(1);
+                    if (keys['ArrowUp']) player2.thrust();
+                }
+
+                // Entity Updates
+                player1.update(dt);
+                player2.update(dt);
+
+                missiles.forEach(m => m.update(dt));
+                particles.forEach(p => p.update(dt));
+
+                // Filter out dead missiles/particles
+                missiles = missiles.filter(m => m.life > 0);
+                particles = particles.filter(p => p.life > 0);
+
+                // Collision Detection: Missile <-> Ship
+                missiles.forEach((m, idx) => {
+                    [player1, player2].forEach(ship => {
+                        if (ship.alive && m.owner !== ship) {
+                            const hitDist = Math.hypot(ship.x - m.x, ship.y - m.y);
+                            if (hitDist < 12) {
+                                ship.destroy();
+                                m.life = 0;
+                                if (m.owner === player1) p1Score++;
+                                if (m.owner === player2) p2Score++;
+                                updateScoreboard();
+                                checkRoundEnd();
+                            }
+                        }
+                    });
+                });
+
+                // Collision Detection: Ship <-> Ship
+                if (player1.alive && player2.alive) {
+                    if (Math.hypot(player1.x - player2.x, player1.y - player2.y) < 20) {
+                        player1.destroy();
+                        player2.destroy();
+                        checkRoundEnd();
+                    }
+                }
+            }
+
+            // Render Frame
+            render();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function checkRoundEnd() {
+            setTimeout(() => {
+                if (!player1.alive || !player2.alive) {
+                    // Respawn players for next engagement
+                    resetShips();
+                }
+            }, 2000);
+        }
+
+        function resetShips() {
+            const w = canvas.width;
+            const h = canvas.height;
+            player1.reset(w * 0.25, h * 0.25);
+            player2.reset(w * 0.75, h * 0.75);
+            // Give initial tangential velocity for orbital mechanics
+            player1.vy = 40;
+            player2.vy = -40;
+        }
+
+        // --- Render Vector Graphics ---
+        function render() {
+            // Phosphor Trail Afterglow Simulation (Semi-transparent black overlay fade)
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Background Vector Stars
+            ctx.fillStyle = '#004411';
+            bgStars.forEach(s => {
+                ctx.fillRect(s.x * canvas.width, s.y * canvas.height, 1.5, 1.5);
+            });
+
+            // Draw Central Pulsating Gravitational Sun
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const pulse = Math.sin(performance.now() * 0.008) * 3;
+
+            ctx.save();
+            ctx.shadowBlur = 15 + pulse * 2;
+            ctx.shadowColor = '#00ff66';
+            ctx.fillStyle = '#00ff66';
+
+            // Pulsating Star Core Array
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, STAR_RADIUS + pulse * 0.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Gravitational Field Ray Array
+            ctx.strokeStyle = 'rgba(0, 255, 102, 0.4)';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 8; i++) {
+                const ang = (performance.now() * 0.001) + (i * Math.PI / 4);
+                ctx.beginPath();
+                ctx.moveTo(centerX + Math.cos(ang) * (STAR_RADIUS + 4), centerY + Math.sin(ang) * (STAR_RADIUS + 4));
+                ctx.lineTo(centerX + Math.cos(ang) * (STAR_RADIUS + 12 + pulse), centerY + Math.sin(ang) * (STAR_RADIUS + 12 + pulse));
+                ctx.stroke();
+            }
+            ctx.restore();
+
+            // Draw Game Entities
+            player1.draw(ctx);
+            player2.draw(ctx);
+            missiles.forEach(m => m.draw(ctx));
+            particles.forEach(p => p.draw(ctx));
+        }
+
+        // --- Coin-Op & Game State Handlers ---
+        function addCredit() {
+            sound.init();
+            credits++;
+            sound.playCoin();
+            document.getElementById('credit-count').innerText = credits.toString().padStart(2, '0');
+
+            if (credits > 0) {
+                document.getElementById('btn-start-1p').disabled = false;
+                document.getElementById('btn-start-1p').classList.remove('cursor-not-allowed', 'bg-emerald-700/50', 'text-neutral-400');
+                document.getElementById('btn-start-1p').classList.add('bg-emerald-600', 'hover:bg-emerald-500', 'text-black');
+
+                document.getElementById('btn-start-2p').disabled = false;
+                document.getElementById('btn-start-2p').classList.remove('cursor-not-allowed', 'bg-emerald-700/50', 'text-neutral-400');
+                document.getElementById('btn-start-2p').classList.add('bg-emerald-600', 'hover:bg-emerald-500', 'text-black');
+
+                document.getElementById('coin-prompt').innerText = "CREDITS READY - SELECT MODE TO PLAY";
+            }
+        }
+
+        function startGame(mode) {
+            if (credits <= 0) return;
+            credits--;
+            document.getElementById('credit-count').innerText = credits.toString().padStart(2, '0');
+
+            gameMode = mode;
+            isPaused = false;
+            pauseUi.classList.add('hidden');
+
+            // Configure Player 1 Ship Type based on radio selection for 1P mode
+            if (gameMode === '1P') {
+                const selectedShip = document.querySelector('input[name="p1-ship"]:checked').value;
+                const aiShip = selectedShip === 'wedge' ? 'needle' : 'wedge';
+
+                player1 = new Ship(100, 100, selectedShip, '#00ff66');
+                player2 = new Ship(700, 500, aiShip, '#00ff66');
+
+                document.getElementById('p1-label').innerText = `PLAYER 1 (${selectedShip.toUpperCase()})`;
+                document.getElementById('p2-label').innerText = `AI BOT (${aiShip.toUpperCase()})`;
+                document.getElementById('p2-controls-legend').innerHTML = `<span class="text-neutral-400">AUTOMATED COMPUTER OPPONENT</span>`;
+            } else {
+                player1 = new Ship(100, 100, 'wedge', '#00ff66');
+                player2 = new Ship(700, 500, 'needle', '#00ff66');
+
+                document.getElementById('p1-label').innerText = "PLAYER 1 (THE WEDGE)";
+                document.getElementById('p2-label').innerText = "PLAYER 2 (THE NEEDLE)";
+                document.getElementById('p2-controls-legend').innerHTML = `
+                    <div>Rotate: <span class="text-white">← / →</span> | Thrust: <span class="text-white">↑</span></div>
+                    <div>Fire: <span class="text-white">↓</span> | Hyperspace: <span class="text-white">Space</span></div>
+                `;
+            }
+
+            gameActive = true;
+            p1Score = 0;
+            p2Score = 0;
+            matchTimer = 120;
+            updateScoreboard();
+
+            document.getElementById('overlay-ui').classList.add('hidden');
+            updateCursorState();
+
+            resetShips();
+
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                if (!isPaused && gameActive) {
+                    matchTimer--;
+                    document.getElementById('game-timer').innerText = `${matchTimer}s`;
+
+                    if (matchTimer <= 0) {
+                        endGame();
+                    }
+                }
+            }, 1000);
+        }
+
+        function endGame() {
+            gameActive = false;
+            isPaused = false;
+            clearInterval(timerInterval);
+            pauseUi.classList.add('hidden');
+            document.getElementById('overlay-ui').classList.remove('hidden');
+            updateCursorState();
+
+            let winnerText = "MATCH TIED!";
+            if (p1Score > p2Score) winnerText = "PLAYER 1 VICTORY!";
+            else if (p2Score > p1Score) winnerText = gameMode === '1P' ? "AI BOT VICTORY!" : "PLAYER 2 VICTORY!";
+
+            document.getElementById('coin-prompt').innerText = `GAME OVER - ${winnerText}`;
+
+            if (credits <= 0) {
+                document.getElementById('btn-start-1p').disabled = true;
+                document.getElementById('btn-start-1p').classList.add('cursor-not-allowed', 'bg-emerald-700/50');
+                document.getElementById('btn-start-2p').disabled = true;
+                document.getElementById('btn-start-2p').classList.add('cursor-not-allowed', 'bg-emerald-700/50');
+            }
+        }
+
+        function updateScoreboard() {
+            document.getElementById('score-p1').innerText = p1Score;
+            document.getElementById('score-p2').innerText = p2Score;
+        }
+
+        // --- Event Listeners ---
+        window.addEventListener('keydown', (e) => {
+            // Pause Toggle with ESC
+            if (e.key === 'Escape') {
+                togglePause();
+                return;
+            }
+
+            keys[e.key] = true;
+
+            // Coin Hotkey
+            if (e.key === 'c' || e.key === 'C') {
+                addCredit();
+            }
+
+            // Start Hotkeys
+            if (e.key === '1' && credits > 0 && !gameActive) {
+                startGame('1P');
+            }
+            if (e.key === '2' && credits > 0 && !gameActive) {
+                startGame('2P');
+            }
+
+            // Fire and Hyperspace Action Triggers
+            if (gameActive && !isPaused) {
+                if (gameMode === '1P') {
+                    // Single Player Dual Fire (S, Space, or Right Shift)
+                    if (e.key === 's' || e.key === 'S' || e.key === ' ' || e.code === 'Space' || e.key === 'ShiftRight') {
+                        player1.fire();
+                    }
+                    // Single Player Dual Hyperspace (Left Shift or Control)
+                    if (e.key === 'Control' || e.key === 'Shift' || e.key === 'ShiftLeft' || e.code === 'ControlLeft' || e.code === 'ControlRight') {
+                        player1.triggerHyperspace();
+                    }
+                } else {
+                    // 2-Player Actions
+                    if (e.key === 's' || e.key === 'S') player1.fire();
+                    if (e.key === 'Shift' || e.key === 'ShiftLeft') player1.triggerHyperspace();
+
+                    if (e.key === 'ArrowDown') player2.fire();
+                    if (e.key === ' ' || e.code === 'Space' || e.key === 'Enter') player2.triggerHyperspace();
+                }
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+        });
+
+        // UI Button Listeners
+        document.getElementById('btn-insert-coin').addEventListener('click', () => addCredit());
+        document.getElementById('btn-start-1p').addEventListener('click', () => startGame('1P'));
+        document.getElementById('btn-start-2p').addEventListener('click', () => startGame('2P'));
+        document.getElementById('btn-resume').addEventListener('click', () => togglePause());
+
+        document.getElementById('btn-audio-toggle').addEventListener('click', () => {
+            sound.enabled = !sound.enabled;
+            document.getElementById('btn-audio-toggle').innerText = sound.enabled ? "🔊 AUDIO: ON" : "🔇 AUDIO: OFF";
+        });
+
+        // Start Loop on Window Load
+        window.onload = function() {
+            requestAnimationFrame(gameLoop);
+        };
+    </script>
+</body>
+</html>
