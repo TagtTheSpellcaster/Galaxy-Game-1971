@@ -57,7 +57,7 @@
             image-rendering: pixelated;
         }
 
-        /* Custom Scrollbars for modal/panels if needed */
+        /* Custom Scrollbars */
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-thumb { background: #00ff66; }
     </style>
@@ -72,8 +72,11 @@
             <span class="hidden md:inline text-xs sm:text-sm text-neutral-400 font-mono">PDP-11 / 1971 COIN-OP</span>
         </div>
 
-        <!-- Status Counters -->
-        <div class="flex items-center space-x-6 text-lg sm:text-2xl">
+        <!-- Status Counters & Controls -->
+        <div class="flex items-center space-x-4 sm:space-x-6 text-lg sm:text-2xl">
+            <button id="btn-screenshot-header" class="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-xs text-yellow-400 font-mono rounded border border-yellow-500/30">
+                📷 SCREENSHOT [P]
+            </button>
             <div>
                 <span class="text-neutral-500 text-xs block font-mono">CREDITS</span>
                 <span id="credit-count" class="bezel-text font-bold text-yellow-400">00</span>
@@ -109,9 +112,10 @@
             <div class="bg-neutral-950 border border-emerald-500/40 p-4 rounded-lg mb-6 max-w-md w-full text-left font-mono text-xs sm:text-sm space-y-2">
                 <div class="text-emerald-400 font-bold border-b border-emerald-500/30 pb-1">INSTRUCTIONS & PHYSICS:</div>
                 <p>• Avoid the central Sun's intense gravitational pull.</p>
-                <p>• Ships carry limited torpedo fuel & energy supply.</p>
+                <p>• Realistic terminal velocity limit prevents uncontrollable ship speeds.</p>
+                <p>• Endless rounds: Defeated ships automatically respawn in random positions.</p>
                 <p>• Hyperspace warps instantly, but risk of explosion increases each use!</p>
-                <p class="text-yellow-400 border-t border-emerald-500/20 pt-1">• Press <span class="text-white font-bold">ESC</span> in-game to Pause / Unpause.</p>
+                <p class="text-yellow-400 border-t border-emerald-500/20 pt-1">• Press <span class="text-white font-bold">ESC</span> to Pause/Unpause | Press <span class="text-white font-bold">P</span> for Screenshot</p>
             </div>
 
             <!-- Ship Selector for 1P Mode -->
@@ -187,7 +191,7 @@
     <script>
         /**
          * GALAXY GAME (1971) - HTML5 Canvas Arcade Emulation
-         * Fully procedural vector canvas rendering with retro audio & Newtonian physics.
+         * Vector canvas rendering with retro audio, Newtonian physics, terminal velocity, & smooth orbital AI.
          */
 
         // --- Web Audio Synthesizer Engine ---
@@ -321,6 +325,7 @@
         let timerInterval = null;
         let p1Score = 0;
         let p2Score = 0;
+        let isResettingRound = false;
 
         // Key Tracker
         const keys = {};
@@ -351,31 +356,39 @@
                 pauseUi.classList.remove('hidden');
             } else {
                 pauseUi.classList.add('hidden');
-                lastTime = performance.now(); // reset time delta after pause
+                lastTime = performance.now();
             }
             updateCursorState();
         }
-        window.addEventListener('resize', resizeCanvas);
-        resizeCanvas();
 
-        // Gravitational Central Star
-        const STAR_GRAVITY = 1800; // Gravitational constant * Mass
+        // Screenshot Exporter Utility
+        function captureScreenshot() {
+            const link = document.createElement('a');
+            const filename = gameActive ? 'gameplay.png' : 'menu.png';
+            link.download = filename;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        // Gravitational Central Star & Physics Constants
+        const STAR_GRAVITY = 1800;
         const STAR_RADIUS = 12;
+        const MAX_SPEED = 240; // Terminal velocity limit for realistic 1971 arcade controls
 
         // --- Game Entities ---
         class Ship {
             constructor(x, y, type, color) {
                 this.type = type; // 'wedge' or 'needle'
                 this.color = color;
-                this.reset(x, y);
+                this.reset(x, y, Math.random() * Math.PI * 2);
             }
 
-            reset(x, y) {
+            reset(x, y, angle) {
                 this.x = x;
                 this.y = y;
                 this.vx = 0;
                 this.vy = 0;
-                this.angle = this.type === 'wedge' ? 0 : Math.PI; // Face opposite directions
+                this.angle = angle !== undefined ? angle : (this.type === 'wedge' ? 0 : Math.PI);
                 this.rotSpeed = 0;
                 this.alive = true;
                 this.hyperspaceCount = 0;
@@ -388,9 +401,9 @@
 
                 // Rotational Inertia
                 this.angle += this.rotSpeed * dt;
-                this.rotSpeed *= 0.92; // Rotational friction
+                this.rotSpeed *= 0.92;
 
-                // Apply Central Gravity Well (Inversely proportional to distance squared)
+                // Apply Central Gravity Well
                 const dx = canvas.width / 2 - this.x;
                 const dy = canvas.height / 2 - this.y;
                 const distSq = dx * dx + dy * dy;
@@ -401,15 +414,22 @@
                     this.vx += (dx / dist) * force * dt * 60;
                     this.vy += (dy / dist) * force * dt * 60;
                 } else {
-                    // Crashed into the star!
                     this.destroy();
+                }
+
+                // Enforce Terminal Velocity (MAX_SPEED limit)
+                const currentSpeed = Math.hypot(this.vx, this.vy);
+                if (currentSpeed > MAX_SPEED) {
+                    const scale = MAX_SPEED / currentSpeed;
+                    this.vx *= scale;
+                    this.vy *= scale;
                 }
 
                 // Physics movement
                 this.x += this.vx * dt;
                 this.y += this.vy * dt;
 
-                // Screen Wrap-around Mechanics (Authentic Spacewar!)
+                // Screen Wrap-around
                 if (this.x < 0) this.x = canvas.width;
                 if (this.x > canvas.width) this.x = 0;
                 if (this.y < 0) this.y = canvas.height;
@@ -420,9 +440,18 @@
 
             thrust() {
                 if (!this.alive || this.fuel <= 0) return;
-                const thrustPower = 180;
+                const thrustPower = this.type === 'needle' ? 190 : 160;
                 this.vx += Math.cos(this.angle) * thrustPower * 0.016;
                 this.vy += Math.sin(this.angle) * thrustPower * 0.016;
+
+                // Re-apply speed limit immediately on thrust
+                const currentSpeed = Math.hypot(this.vx, this.vy);
+                if (currentSpeed > MAX_SPEED) {
+                    const scale = MAX_SPEED / currentSpeed;
+                    this.vx *= scale;
+                    this.vy *= scale;
+                }
+
                 this.fuel -= 0.5;
                 sound.playThrust();
 
@@ -443,12 +472,11 @@
 
             fire() {
                 if (!this.alive || this.cooldown > 0) return;
-                this.cooldown = 0.25; // Delay between shots
+                this.cooldown = 0.25;
                 const noseOffset = 16;
                 const noseX = this.x + Math.cos(this.angle) * noseOffset;
                 const noseY = this.y + Math.sin(this.angle) * noseOffset;
 
-                // Missile velocity inherits ship momentum
                 const speed = 320;
                 const missileVx = this.vx + Math.cos(this.angle) * speed;
                 const missileVy = this.vy + Math.sin(this.angle) * speed;
@@ -462,18 +490,16 @@
                 sound.playHyperspace();
                 this.hyperspaceCount++;
 
-                // Risk of destruction increases with each consecutive attempt
                 const explosionRisk = (this.hyperspaceCount - 1) * 0.25;
                 if (Math.random() < explosionRisk) {
                     this.destroy();
                     return;
                 }
 
-                // Random teleport on screen with random velocity
                 this.x = Math.random() * canvas.width;
                 this.y = Math.random() * canvas.height;
-                this.vx = (Math.random() - 0.5) * 100;
-                this.vy = (Math.random() - 0.5) * 100;
+                this.vx = (Math.random() - 0.5) * 80;
+                this.vy = (Math.random() - 0.5) * 80;
             }
 
             destroy() {
@@ -481,7 +507,6 @@
                 this.alive = false;
                 sound.playExplosion();
 
-                // Create Vector Explosion Particle Cloud
                 for (let i = 0; i < 24; i++) {
                     const ang = Math.random() * Math.PI * 2;
                     const spd = 40 + Math.random() * 160;
@@ -507,14 +532,12 @@
 
                 ctx.beginPath();
                 if (this.type === 'wedge') {
-                    // "The Wedge" Ship Vector Model
                     ctx.moveTo(14, 0);
                     ctx.lineTo(-10, -9);
                     ctx.lineTo(-5, 0);
                     ctx.lineTo(-10, 9);
                     ctx.closePath();
                 } else {
-                    // "The Needle / Pencil" Ship Vector Model
                     ctx.moveTo(16, 0);
                     ctx.lineTo(-12, -4);
                     ctx.lineTo(-12, 4);
@@ -535,11 +558,10 @@
                 this.vx = vx;
                 this.vy = vy;
                 this.owner = owner;
-                this.life = 3.0; // Seconds active
+                this.life = 3.0;
             }
 
             update(dt) {
-                // Sun Gravity Pull on Missiles
                 const dx = canvas.width / 2 - this.x;
                 const dy = canvas.height / 2 - this.y;
                 const distSq = dx * dx + dy * dy;
@@ -550,13 +572,12 @@
                     this.vx += (dx / dist) * force * dt * 60;
                     this.vy += (dy / dist) * force * dt * 60;
                 } else {
-                    this.life = 0; // Destroyed by star
+                    this.life = 0;
                 }
 
                 this.x += this.vx * dt;
                 this.y += this.vy * dt;
 
-                // Screen Wrap
                 if (this.x < 0) this.x = canvas.width;
                 if (this.x > canvas.width) this.x = 0;
                 if (this.y < 0) this.y = canvas.height;
@@ -621,7 +642,7 @@
             brightness: Math.random()
         }));
 
-        // Advanced AI Logic with Predictive Aiming, Active Evasion, and Orbit Management
+        // Smoothed AI Logic with Stable Orbital Control
         function updateAI(dt) {
             const ai = player2;
             const target = player1;
@@ -631,121 +652,61 @@
             const sunX = canvas.width / 2;
             const sunY = canvas.height / 2;
 
-            // 1. GRAVITY SUN AVOIDANCE (Top Priority)
             const sunDx = sunX - ai.x;
             const sunDy = sunY - ai.y;
             const sunDist = Math.hypot(sunDx, sunDy);
 
-            // Vector pointing away from sun
-            let desiredVx = 0;
-            let desiredVy = 0;
+            let targetSteerAngle = 0;
+            let mustThrust = false;
 
-            if (sunDist < 160) {
-                // Tangential + radial escape vector
-                const escapePower = (160 - sunDist) / 160;
-                desiredVx += (-sunDx / sunDist + -sunDy / sunDist * 0.5) * escapePower * 300;
-                desiredVy += (-sunDy / sunDist + sunDx / sunDist * 0.5) * escapePower * 300;
-            }
+            // 1. STAR GRAVITY AVOIDANCE
+            if (sunDist < 200) {
+                const perpX = -sunDy / sunDist;
+                const perpY = sunDx / sunDist;
+                targetSteerAngle = Math.atan2(perpY - (sunDy / sunDist) * 0.8, perpX - (sunDx / sunDist) * 0.8);
+                mustThrust = true;
+            } else {
+                // 2. TARGET PREDICTIVE LEADING
+                const dx = target.x - ai.x;
+                const dy = target.y - ai.y;
+                const dist = Math.hypot(dx, dy);
 
-            // 2. ACTIVE BULLET EVASION
-            let dangerBullet = null;
-            let minThreatDist = 180;
+                const timeToTarget = dist / 320;
+                const targetPredX = target.x + target.vx * timeToTarget;
+                const targetPredY = target.y + target.vy * timeToTarget;
 
-            for (const m of missiles) {
-                if (m.owner !== ai) {
-                    const mDx = m.x - ai.x;
-                    const mDy = m.y - ai.y;
-                    const mDist = Math.hypot(mDx, mDy);
+                targetSteerAngle = Math.atan2(targetPredY - ai.y, targetPredX - ai.x);
 
-                    // Check if bullet is approaching AI
-                    const relVx = m.vx - ai.vx;
-                    const relVy = m.vy - ai.vy;
-                    const dot = (mDx * relVx + mDy * relVy);
-
-                    if (mDist < minThreatDist && dot < 0) {
-                        minThreatDist = mDist;
-                        dangerBullet = { m, mDx, mDy, mDist, relVx, relVy };
-                    }
+                if (dist > 180 && dist < 450) {
+                    mustThrust = true;
                 }
             }
 
-            let isEvading = false;
-            if (dangerBullet) {
-                isEvading = true;
-                // Perpendicular evasion vector away from incoming missile path
-                const perpX = -dangerBullet.mDy / dangerBullet.mDist;
-                const perpY = dangerBullet.mDx / dangerBullet.mDist;
-                desiredVx += perpX * 280;
-                desiredVy += perpY * 280;
-
-                // Emergency Hyperspace if bullet is extremely close and direct hit is imminent
-                if (dangerBullet.mDist < 45 && Math.random() < 0.08) {
-                    ai.triggerHyperspace();
-                    return;
-                }
-            }
-
-            // 3. TACTICAL ENGAGEMENT & DEFLECTION SHOOTING (Lead Target Calculation)
-            const dx = target.x - ai.x;
-            const dy = target.y - ai.y;
-            const dist = Math.hypot(dx, dy);
-
-            // Calculate lead target intercept time
-            const projectileSpeed = 320;
-            const timeToTarget = dist / projectileSpeed;
-
-            // Target predicted position (taking velocity into account)
-            const targetPredX = target.x + target.vx * timeToTarget;
-            const targetPredY = target.y + target.vy * timeToTarget;
-
-            const predDx = targetPredX - ai.x;
-            const predDy = targetPredY - ai.y;
-            let aimAngle = Math.atan2(predDy, predDx);
-
-            // Positioning strategy: maintain ideal combat distance (~180-280px)
-            if (!isEvading && sunDist >= 160) {
-                if (dist > 280) {
-                    // Close in
-                    desiredVx += (dx / dist) * 150;
-                    desiredVy += (dy / dist) * 150;
-                } else if (dist < 120) {
-                    // Back off
-                    desiredVx -= (dx / dist) * 150;
-                    desiredVy -= (dy / dist) * 150;
-                } else {
-                    // Lateral strafe maneuver
-                    desiredVx += (-dy / dist) * 100;
-                    desiredVy += (dx / dist) * 100;
-                }
-            }
-
-            // Determine steering direction based on desired trajectory vs current angle
-            let targetSteerAngle = isEvading ? Math.atan2(desiredVy, desiredVx) : aimAngle;
-
+            // Smooth Turn Interpolation
             let angleDiff = targetSteerAngle - ai.angle;
             while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
             while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
 
-            // Apply smooth rotation
-            if (angleDiff > 0.08) ai.rotate(1);
-            else if (angleDiff < -0.08) ai.rotate(-1);
+            if (angleDiff > 0.1) ai.rotate(1);
+            else if (angleDiff < -0.1) ai.rotate(-1);
 
-            // Apply thrust intelligently
-            if (isEvading || sunDist < 160) {
-                if (Math.abs(angleDiff) < 0.6) {
-                    ai.thrust();
-                }
-            } else if (dist > 180 && Math.abs(angleDiff) < 0.4) {
+            if (mustThrust && Math.abs(angleDiff) < 0.5) {
                 ai.thrust();
             }
 
-            // Firing Decision (when aligned with lead target)
-            let directAngleDiff = aimAngle - ai.angle;
-            while (directAngleDiff < -Math.PI) directAngleDiff += Math.PI * 2;
-            while (directAngleDiff > Math.PI) directAngleDiff -= Math.PI * 2;
+            // Fire Logic
+            if (sunDist > 150) {
+                const dx = target.x - ai.x;
+                const dy = target.y - ai.y;
+                const dist = Math.hypot(dx, dy);
+                const directAngle = Math.atan2(dy, dx);
+                let directAngleDiff = directAngle - ai.angle;
+                while (directAngleDiff < -Math.PI) directAngleDiff += Math.PI * 2;
+                while (directAngleDiff > Math.PI) directAngleDiff -= Math.PI * 2;
 
-            if (Math.abs(directAngleDiff) < 0.18 && dist < 420) {
-                ai.fire();
+                if (Math.abs(directAngleDiff) < 0.25 && dist < 420) {
+                    ai.fire();
+                }
             }
         }
 
@@ -759,14 +720,12 @@
             if (gameActive && !isPaused) {
                 // Controls Processing
                 if (gameMode === '1P') {
-                    // Unified Dual Controls Scheme for 1-Player Mode (A/D or Arrows for rotation)
                     if (keys['a'] || keys['A'] || keys['ArrowLeft']) player1.rotate(-1);
                     if (keys['d'] || keys['D'] || keys['ArrowRight']) player1.rotate(1);
                     if (keys['w'] || keys['W'] || keys['ArrowUp']) player1.thrust();
 
                     updateAI(dt);
                 } else {
-                    // 2-Player Controls
                     if (keys['a'] || keys['A']) player1.rotate(-1);
                     if (keys['d'] || keys['D']) player1.rotate(1);
                     if (keys['w'] || keys['W']) player1.thrust();
@@ -783,12 +742,11 @@
                 missiles.forEach(m => m.update(dt));
                 particles.forEach(p => p.update(dt));
 
-                // Filter out dead missiles/particles
                 missiles = missiles.filter(m => m.life > 0);
                 particles = particles.filter(p => p.life > 0);
 
                 // Collision Detection: Missile <-> Ship
-                missiles.forEach((m, idx) => {
+                missiles.forEach((m) => {
                     [player1, player2].forEach(ship => {
                         if (ship.alive && m.owner !== ship) {
                             const hitDist = Math.hypot(ship.x - m.x, ship.y - m.y);
@@ -812,6 +770,11 @@
                         checkRoundEnd();
                     }
                 }
+
+                // Check environment deaths (Sun crash)
+                if ((!player1.alive || !player2.alive) && !isResettingRound) {
+                    checkRoundEnd();
+                }
             }
 
             // Render Frame
@@ -821,27 +784,53 @@
         }
 
         function checkRoundEnd() {
+            if (isResettingRound) return;
+            isResettingRound = true;
+
             setTimeout(() => {
-                if (!player1.alive || !player2.alive) {
-                    // Respawn players for next engagement
-                    resetShips();
-                }
+                resetShips();
+                isResettingRound = false;
             }, 2000);
         }
 
+        function getRandomSpawnPosition(sunX, sunY, minOrbit, maxOrbit) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = minOrbit + Math.random() * (maxOrbit - minOrbit);
+            return {
+                x: sunX + Math.cos(angle) * dist,
+                y: sunY + Math.sin(angle) * dist,
+                angle: Math.random() * Math.PI * 2
+            };
+        }
+
         function resetShips() {
-            const w = canvas.width;
-            const h = canvas.height;
-            player1.reset(w * 0.25, h * 0.25);
-            player2.reset(w * 0.75, h * 0.75);
-            // Give initial tangential velocity for orbital mechanics
-            player1.vy = 40;
-            player2.vy = -40;
+            const sunX = canvas.width / 2;
+            const sunY = canvas.height / 2;
+            const minDist = Math.min(canvas.width, canvas.height) * 0.25;
+            const maxDist = Math.min(canvas.width, canvas.height) * 0.42;
+
+            const p1Pos = getRandomSpawnPosition(sunX, sunY, minDist, maxDist);
+            let p2Pos = getRandomSpawnPosition(sunX, sunY, minDist, maxDist);
+
+            while (Math.hypot(p1Pos.x - p2Pos.x, p1Pos.y - p2Pos.y) < 220) {
+                p2Pos = getRandomSpawnPosition(sunX, sunY, minDist, maxDist);
+            }
+
+            player1.reset(p1Pos.x, p1Pos.y, p1Pos.angle);
+            player2.reset(p2Pos.x, p2Pos.y, p2Pos.angle);
+
+            // Give initial tangential orbital momentum
+            const p1SunAngle = Math.atan2(p1Pos.y - sunY, p1Pos.x - sunX);
+            player1.vx = -Math.sin(p1SunAngle) * (40 + Math.random() * 30);
+            player1.vy = Math.cos(p1SunAngle) * (40 + Math.random() * 30);
+
+            const p2SunAngle = Math.atan2(p2Pos.y - sunY, p2Pos.x - sunX);
+            player2.vx = -Math.sin(p2SunAngle) * (40 + Math.random() * 30);
+            player2.vy = Math.cos(p2SunAngle) * (40 + Math.random() * 30);
         }
 
         // --- Render Vector Graphics ---
         function render() {
-            // Phosphor Trail Afterglow Simulation (Semi-transparent black overlay fade)
             ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -861,12 +850,10 @@
             ctx.shadowColor = '#00ff66';
             ctx.fillStyle = '#00ff66';
 
-            // Pulsating Star Core Array
             ctx.beginPath();
             ctx.arc(centerX, centerY, STAR_RADIUS + pulse * 0.5, 0, Math.PI * 2);
             ctx.fill();
 
-            // Gravitational Field Ray Array
             ctx.strokeStyle = 'rgba(0, 255, 102, 0.4)';
             ctx.lineWidth = 1;
             for (let i = 0; i < 8; i++) {
@@ -878,7 +865,7 @@
             }
             ctx.restore();
 
-            // Draw Game Entities
+            // Draw Entities
             player1.draw(ctx);
             player2.draw(ctx);
             missiles.forEach(m => m.draw(ctx));
@@ -912,9 +899,9 @@
 
             gameMode = mode;
             isPaused = false;
+            isResettingRound = false;
             pauseUi.classList.add('hidden');
 
-            // Configure Player 1 Ship Type based on radio selection for 1P mode
             if (gameMode === '1P') {
                 const selectedShip = document.querySelector('input[name="p1-ship"]:checked').value;
                 const aiShip = selectedShip === 'wedge' ? 'needle' : 'wedge';
@@ -990,20 +977,22 @@
 
         // --- Event Listeners ---
         window.addEventListener('keydown', (e) => {
-            // Pause Toggle with ESC
             if (e.key === 'Escape') {
                 togglePause();
                 return;
             }
 
+            if (e.key === 'p' || e.key === 'P') {
+                captureScreenshot();
+                return;
+            }
+
             keys[e.key] = true;
 
-            // Coin Hotkey
             if (e.key === 'c' || e.key === 'C') {
                 addCredit();
             }
 
-            // Start Hotkeys
             if (e.key === '1' && credits > 0 && !gameActive) {
                 startGame('1P');
             }
@@ -1011,19 +1000,15 @@
                 startGame('2P');
             }
 
-            // Fire and Hyperspace Action Triggers
             if (gameActive && !isPaused) {
                 if (gameMode === '1P') {
-                    // Single Player Dual Fire (S, Space, or Right Shift)
                     if (e.key === 's' || e.key === 'S' || e.key === ' ' || e.code === 'Space' || e.key === 'ShiftRight') {
                         player1.fire();
                     }
-                    // Single Player Dual Hyperspace (Left Shift or Control)
                     if (e.key === 'Control' || e.key === 'Shift' || e.key === 'ShiftLeft' || e.code === 'ControlLeft' || e.code === 'ControlRight') {
                         player1.triggerHyperspace();
                     }
                 } else {
-                    // 2-Player Actions
                     if (e.key === 's' || e.key === 'S') player1.fire();
                     if (e.key === 'Shift' || e.key === 'ShiftLeft') player1.triggerHyperspace();
 
@@ -1037,18 +1022,18 @@
             keys[e.key] = false;
         });
 
-        // UI Button Listeners
+        // UI Buttons
         document.getElementById('btn-insert-coin').addEventListener('click', () => addCredit());
         document.getElementById('btn-start-1p').addEventListener('click', () => startGame('1P'));
         document.getElementById('btn-start-2p').addEventListener('click', () => startGame('2P'));
         document.getElementById('btn-resume').addEventListener('click', () => togglePause());
+        document.getElementById('btn-screenshot-header').addEventListener('click', () => captureScreenshot());
 
         document.getElementById('btn-audio-toggle').addEventListener('click', () => {
             sound.enabled = !sound.enabled;
             document.getElementById('btn-audio-toggle').innerText = sound.enabled ? "🔊 AUDIO: ON" : "🔇 AUDIO: OFF";
         });
 
-        // Start Loop on Window Load
         window.onload = function() {
             requestAnimationFrame(gameLoop);
         };
